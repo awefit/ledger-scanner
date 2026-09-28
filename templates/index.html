@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ledger Scanner</title>
+<style>
+  :root{--bg:#0D1013;--panel:#14181D;--panel2:#191E24;--border:#262C34;--text:#E7EAEE;--dim:#8A93A0;--faint:#5C6570;--amber:#E8A33D;--amberdim:#5a4218;--green:#34C77B;--gd:rgba(52,199,123,.12);--red:#E5615A;--rd:rgba(229,97,90,.12)}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+  .wrap{max-width:1200px;margin:0 auto;padding:28px 20px 60px}
+  header{display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px;margin-bottom:20px}
+  h1{margin:0;font-size:26px;letter-spacing:-.01em} h1 span{color:var(--amber)}
+  .sub{color:var(--faint);font-size:12.5px;margin-top:4px}
+  .status{font-size:12.5px;color:var(--dim);display:flex;gap:8px;align-items:center}
+  .dot{width:7px;height:7px;border-radius:50%;background:var(--faint)}
+  .dot.ok{background:var(--green)} .dot.err{background:var(--red)}
+  .controls{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:12px}
+  input,select,button{background:var(--panel);border:1px solid var(--border);color:var(--text);font:inherit;font-size:13px;padding:8px 11px;border-radius:8px;outline:none}
+  input{flex:1 1 220px} input:focus{border-color:var(--amber)}
+  button{cursor:pointer} button:hover{border-color:var(--faint)}
+  .chip.active{background:var(--amberdim);border-color:var(--amberdim);color:var(--amber)}
+  .meta{font-size:12px;color:var(--faint);margin:6px 0 12px}
+  .err-box{border:1px solid var(--red);background:var(--rd);border-radius:8px;padding:10px 14px;font-size:13px;margin-bottom:12px}
+  .shell{border:1px solid var(--border);border-radius:10px;background:var(--panel);overflow:auto}
+  table{width:100%;border-collapse:collapse;min-width:820px}
+  th{background:var(--panel2);color:var(--faint);font-size:11px;font-weight:600;padding:10px 14px;text-align:right;cursor:pointer;white-space:nowrap;position:sticky;top:0}
+  th.l,td.l{text-align:left}
+  td{padding:10px 14px;text-align:right;border-top:1px solid #1D2229;font-size:13.5px;font-variant-numeric:tabular-nums;white-space:nowrap}
+  tr:hover td{background:var(--panel2)}
+  .sym{color:var(--faint);font-size:11.5px;margin-left:6px}
+  .badge{font-size:10.5px;padding:2px 7px;border-radius:5px;background:var(--panel2);color:var(--dim)}
+  .badge.stock{color:var(--amber)}
+  .pct{padding:2px 7px;border-radius:5px;font-weight:600;font-size:12.5px}
+  .pos{color:var(--green);background:var(--gd)} .neg{color:var(--red);background:var(--rd)} .flat{color:var(--faint)}
+  .star{background:none;border:none;color:var(--faint);font-size:15px;padding:0 4px;cursor:pointer}
+  .star.on{color:var(--amber)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div><h1>Ledger<span>•</span> Scanner</h1><div class="sub">Crypto (CoinGecko) + saham BEI (Yahoo Finance .JK)</div></div>
+    <div class="status"><span class="dot" id="dot"></span><span id="status">Memuat…</span><button id="refresh">↻</button></div>
+  </header>
+  <div id="errs"></div>
+  <div class="controls">
+    <input id="q" placeholder="Cari nama atau simbol…">
+    <select id="type"><option value="all">Crypto + Saham</option><option value="crypto">Crypto</option><option value="stock">Saham BEI</option></select>
+    <select id="tier"><option value="all">Semua tier</option><option value="mega">Mega</option><option value="large">Large</option><option value="mid">Mid</option><option value="small">Small</option><option value="micro">Micro</option></select>
+    <select id="limit"><option>50</option><option selected>100</option><option>250</option><option>500</option></select>
+  </div>
+  <div class="controls">
+    <button class="chip active" data-f="all">Semua</button>
+    <button class="chip" data-f="gainers">Top gainers 24j</button>
+    <button class="chip" data-f="losers">Top losers 24j</button>
+    <button class="chip" data-f="volume">Volume tertinggi</button>
+    <button class="chip" data-f="watch">⭐ Watchlist</button>
+  </div>
+  <div class="meta" id="meta"></div>
+  <div class="shell"><table>
+    <thead><tr>
+      <th class="l" style="width:30px"></th><th class="l" data-s="name">Aset</th><th class="l">Jenis</th>
+      <th data-s="price">Harga</th><th data-s="change_24h_pct">24j%</th><th data-s="change_7d_pct">7h%</th>
+      <th data-s="market_cap">Market Cap</th><th data-s="volume_24h">Volume 24j</th>
+    </tr></thead>
+    <tbody id="tb"><tr><td colspan="8" class="l" style="padding:40px;text-align:center;color:var(--faint)">Memuat…</td></tr></tbody>
+  </table></div>
+</div>
+<script>
+const S={rows:[],sort:'market_cap',dir:-1,f:'all',watch:{}};
+try{S.watch=JSON.parse(localStorage.getItem('ledger_watch')||'{}')}catch(e){}
+const $=id=>document.getElementById(id);
+const tier=(c,cur)=>{if(c==null)return'micro';const u=cur==='IDR'?c/16000:c;return u>1e10?'mega':u>1e9?'large':u>1e8?'mid':u>1e7?'small':'micro'};
+const money=(n,cur)=>{if(n==null)return'—';const sym=cur==='IDR'?'Rp ':'$';
+  if(n>=1e6)return sym+Intl.NumberFormat('en',{notation:'compact',maximumFractionDigits:2}).format(n);
+  return sym+n.toLocaleString('en',{maximumFractionDigits:n<1?6:2})};
+const pct=n=>{if(n==null||isNaN(n))return'<span class="pct flat">—</span>';
+  const c=n>0.05?'pos':n<-0.05?'neg':'flat';return `<span class="pct ${c}">${n>0?'+':''}${n.toFixed(2)}%</span>`};
+const key=r=>r.type+':'+r.symbol;
+
+async function load(){
+  $('dot').className='dot';$('status').textContent='Memuat…';
+  try{
+    const r=await fetch('/api/data?type='+$('type').value);const j=await r.json();
+    S.rows=j.rows;
+    const errs=Object.entries(j.errors||{});
+    $('errs').innerHTML=errs.length?'<div class="err-box">Sebagian data gagal dimuat: '+errs.map(([k,v])=>k+' ('+v+')').join('; ')+'</div>':'';
+    $('dot').className='dot '+(errs.length?'err':'ok');
+    $('status').textContent='Diperbarui '+new Date().toLocaleTimeString('id-ID');
+    render();
+  }catch(e){$('dot').className='dot err';$('status').textContent='Gagal memuat'}
+}
+
+function render(){
+  let rows=S.rows.slice();
+  const q=$('q').value.trim().toLowerCase(),t=$('tier').value;
+  if(q)rows=rows.filter(r=>(r.name||'').toLowerCase().includes(q)||r.symbol.toLowerCase().includes(q));
+  if(t!=='all')rows=rows.filter(r=>tier(r.market_cap,r.currency)===t);
+  let sort=S.sort,dir=S.dir;
+  if(S.f==='gainers'){rows=rows.filter(r=>(r.change_24h_pct||0)>0);sort='change_24h_pct';dir=-1}
+  if(S.f==='losers'){rows=rows.filter(r=>(r.change_24h_pct||0)<0);sort='change_24h_pct';dir=1}
+  if(S.f==='volume'){sort='volume_24h';dir=-1}
+  if(S.f==='watch')rows=rows.filter(r=>S.watch[key(r)]);
+  rows.sort((a,b)=>{let x=a[sort],y=b[sort];
+    if(sort==='name'){x=(x||'').toLowerCase();y=(y||'').toLowerCase()}
+    if(x==null)x=-Infinity;if(y==null)y=-Infinity;return x<y?-dir:x>y?dir:0});
+  const lim=parseInt($('limit').value),shown=rows.slice(0,lim);
+  $('meta').textContent=`Menampilkan ${shown.length} dari ${rows.length} aset. Crypto dalam USD, saham dalam IDR.`;
+  $('tb').innerHTML=shown.length?shown.map(r=>`<tr>
+    <td class="l"><button class="star ${S.watch[key(r)]?'on':''}" data-k="${key(r)}">${S.watch[key(r)]?'★':'☆'}</button></td>
+    <td class="l"><b>${r.name||r.symbol}</b><span class="sym">${r.symbol}</span></td>
+    <td class="l"><span class="badge ${r.type}">${r.type==='crypto'?'Crypto':'Saham'}</span></td>
+    <td>${money(r.price,r.currency)}</td><td>${pct(r.change_24h_pct)}</td><td>${pct(r.change_7d_pct)}</td>
+    <td>${money(r.market_cap,r.currency)}</td><td>${money(r.volume_24h,r.currency)}</td></tr>`).join('')
+    :'<tr><td colspan="8" class="l" style="padding:40px;text-align:center;color:var(--faint)">Tidak ada hasil.</td></tr>';
+  document.querySelectorAll('.star').forEach(b=>b.onclick=()=>{const k=b.dataset.k;
+    S.watch[k]?delete S.watch[k]:S.watch[k]=1;
+    try{localStorage.setItem('ledger_watch',JSON.stringify(S.watch))}catch(e){}render()});
+}
+
+$('q').oninput=render;$('tier').onchange=render;$('limit').onchange=render;
+$('type').onchange=load;$('refresh').onclick=load;
+document.querySelectorAll('.chip').forEach(c=>c.onclick=()=>{
+  document.querySelectorAll('.chip').forEach(x=>x.classList.remove('active'));c.classList.add('active');S.f=c.dataset.f;render()});
+document.querySelectorAll('th[data-s]').forEach(th=>th.onclick=()=>{
+  const s=th.dataset.s;if(S.sort===s)S.dir*=-1;else{S.sort=s;S.dir=s==='name'?1:-1}render()});
+load();setInterval(load,60000);
+</script>
+</body>
+</html>
