@@ -71,6 +71,7 @@
 const S={rows:[],sort:'market_cap',dir:-1,f:'all',watch:{}};
 try{S.watch=JSON.parse(localStorage.getItem('ledger_watch')||'{}')}catch(e){}
 const $=id=>document.getElementById(id);
+const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]));
 const tier=(c,cur)=>{if(c==null)return'micro';const u=cur==='IDR'?c/16000:c;return u>1e10?'mega':u>1e9?'large':u>1e8?'mid':u>1e7?'small':'micro'};
 const money=(n,cur)=>{if(n==null)return'—';const sym=cur==='IDR'?'Rp ':'$';
   if(n>=1e6)return sym+Intl.NumberFormat('en',{notation:'compact',maximumFractionDigits:2}).format(n);
@@ -82,10 +83,18 @@ const key=r=>r.type+':'+r.symbol;
 async function load(){
   $('dot').className='dot';$('status').textContent='Memuat…';
   try{
-    const r=await fetch('/api/data?type='+$('type').value);const j=await r.json();
-    S.rows=j.rows;
+    const r=await fetch('/api/data?type='+encodeURIComponent($('type').value));
+    if(!r.ok)throw new Error('request failed');
+    const j=await r.json();
+    S.rows=Array.isArray(j.rows)?j.rows:[];
     const errs=Object.entries(j.errors||{});
-    $('errs').innerHTML=errs.length?'<div class="err-box">Sebagian data gagal dimuat: '+errs.map(([k,v])=>k+' ('+v+')').join('; ')+'</div>':'';
+    $('errs').textContent='';
+    if(errs.length){
+      const box=document.createElement('div');
+      box.className='err-box';
+      box.textContent='Sebagian data gagal dimuat: '+errs.map(([k,v])=>k+' ('+v+')').join('; ');
+      $('errs').appendChild(box);
+    }
     $('dot').className='dot '+(errs.length?'err':'ok');
     $('status').textContent='Diperbarui '+new Date().toLocaleTimeString('id-ID');
     render();
@@ -95,7 +104,7 @@ async function load(){
 function render(){
   let rows=S.rows.slice();
   const q=$('q').value.trim().toLowerCase(),t=$('tier').value;
-  if(q)rows=rows.filter(r=>(r.name||'').toLowerCase().includes(q)||r.symbol.toLowerCase().includes(q));
+  if(q)rows=rows.filter(r=>(r.name||'').toLowerCase().includes(q)||String(r.symbol||'').toLowerCase().includes(q));
   if(t!=='all')rows=rows.filter(r=>tier(r.market_cap,r.currency)===t);
   let sort=S.sort,dir=S.dir;
   if(S.f==='gainers'){rows=rows.filter(r=>(r.change_24h_pct||0)>0);sort='change_24h_pct';dir=-1}
@@ -108,8 +117,8 @@ function render(){
   const lim=parseInt($('limit').value),shown=rows.slice(0,lim);
   $('meta').textContent=`Menampilkan ${shown.length} dari ${rows.length} aset. Crypto dalam USD, saham dalam IDR.`;
   $('tb').innerHTML=shown.length?shown.map(r=>`<tr>
-    <td class="l"><button class="star ${S.watch[key(r)]?'on':''}" data-k="${key(r)}">${S.watch[key(r)]?'★':'☆'}</button></td>
-    <td class="l"><b>${r.name||r.symbol}</b><span class="sym">${r.symbol}</span></td>
+    <td class="l"><button class="star ${S.watch[key(r)]?'on':''}" data-k="${esc(key(r))}">${S.watch[key(r)]?'★':'☆'}</button></td>
+    <td class="l"><b>${esc(r.name||r.symbol)}</b><span class="sym">${esc(r.symbol)}</span></td>
     <td class="l"><span class="badge ${r.type}">${r.type==='crypto'?'Crypto':'Saham'}</span></td>
     <td>${money(r.price,r.currency)}</td><td>${pct(r.change_24h_pct)}</td><td>${pct(r.change_7d_pct)}</td>
     <td>${money(r.market_cap,r.currency)}</td><td>${money(r.volume_24h,r.currency)}</td></tr>`).join('')
