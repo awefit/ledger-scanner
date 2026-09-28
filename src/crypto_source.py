@@ -1,4 +1,4 @@
-"""Ambil data crypto dari CoinGecko (public API, tanpa API key)."""
+"""Ambil data crypto dari public market-data API."""
 import time
 import requests
 
